@@ -85,9 +85,7 @@ class NativeSocket implements Socket
 			if (false === $written) {
 				$this->throwException();
 			}
-			if ($written > 0) {
-				$data = \substr($data, $written);
-			}
+			$data = (string) \substr($data, $written);
 		}
 	}
 

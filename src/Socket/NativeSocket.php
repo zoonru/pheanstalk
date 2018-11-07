@@ -74,14 +74,20 @@ class NativeSocket implements Socket
 	 */
 	public function write($data)
 	{
-		$data = (string) $data;
 		$this->checkClosed();
+
+		if (!is_string($data)){
+			return;
+		}
+
 		while ('' !== $data) {
-			$written = \socket_write($this->socket, $data);
+			$written = \socket_write($this->socket, $data, \strlen($data));
 			if (false === $written) {
 				$this->throwException();
 			}
-			$data = \substr($data, $written);
+			if ($written > 0) {
+				$data = \substr($data, $written);
+			}
 		}
 	}
 

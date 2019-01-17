@@ -15,7 +15,7 @@ class Connection
 {
     const CRLF = "\r\n";
     const CRLF_LENGTH = 2;
-    const DEFAULT_CONNECT_TIMEOUT = 2;
+	const DEFAULT_TIMEOUT = 2;
 
     // responses which are global errors, mapped to their exception short-names
     private static $_errorResponses = array(
@@ -36,25 +36,22 @@ class Connection
     private $_socket;
     private $_hostname;
     private $_port;
-    private $_connectTimeout;
-    private $_connectPersistent;
+    private $_timeout;
 
     /**
      * @param string $hostname
      * @param int    $port
-     * @param float  $connectTimeout
-     * @param bool   $connectPersistent
+	 * @param int   $timeout
      */
-    public function __construct($hostname, $port, $connectTimeout = null, $connectPersistent = false)
+	public function __construct($hostname, $port, $timeout = null)
     {
-        if (is_null($connectTimeout) || !is_numeric($connectTimeout)) {
-            $connectTimeout = self::DEFAULT_CONNECT_TIMEOUT;
-        }
+		if (is_null($timeout) || !is_numeric($timeout)) {
+			$timeout = self::DEFAULT_TIMEOUT;
+		}
 
         $this->_hostname = $hostname;
         $this->_port = $port;
-        $this->_connectTimeout = $connectTimeout;
-        $this->_connectPersistent = $connectPersistent;
+		$this->_timeout = $timeout;
     }
 
     /**
@@ -146,13 +143,13 @@ class Connection
     }
 
     /**
-     * Returns the connect timeout for this connection.
+     * Returns the timeout for this connection.
      *
      * @return float
      */
-    public function getConnectTimeout()
+    public function getTimeout()
     {
-        return $this->_connectTimeout;
+        return $this->_timeout;
     }
 
     /**
@@ -190,8 +187,7 @@ class Connection
             $this->_socket = new NativeSocket(
                 $this->_hostname,
                 $this->_port,
-                $this->_connectTimeout,
-                $this->_connectPersistent
+                $this->_timeout
             );
         }
 

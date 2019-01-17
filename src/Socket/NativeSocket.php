@@ -14,30 +14,24 @@ use Pheanstalk\Socket;
  */
 class NativeSocket implements Socket
 {
-    /**
-     * The default timeout for a blocking read on the socket.
-     */
-    const SOCKET_TIMEOUT = 1;
-
-    /**
-     * Number of retries for attempted writes which return zero length.
-     */
-    const WRITE_RETRIES = 8;
-
 	/** @var resource */
     private $socket;
+	/** @var int $timeout in seconds*/
+	private $timeout;
 
 	/**
 	 * NativeSocket constructor.
 	 * @param $host
 	 * @param $port
-	 * @param $connectTimeout
+	 * @param $timeout
 	 * @throws \Exception
 	 * @throws Exception\ConnectionException
 	 * @throws Exception\SocketException
 	 */
-    public function __construct($host, $port, $connectTimeout)
+	public function __construct($host, $port, $timeout)
     {
+		$this->timeout = $timeout;
+		
 	    if (!\extension_loaded('sockets')) {
 		    throw new \Exception('Sockets extension not found');
 	    }
@@ -45,15 +39,13 @@ class NativeSocket implements Socket
 	    if (false === $this->socket) {
 		    $this->throwException();
 	    }
-	    $timeout = [
-		    'sec' => $connectTimeout,
-		    'usec' => 0,
-	    ];
-	    $sendTimeout = \socket_get_option($this->socket, SOL_SOCKET, SO_SNDTIMEO);
-	    $receiveTimeout = \socket_get_option($this->socket, SOL_SOCKET, SO_RCVTIMEO);
+		$timeval = [
+			'sec' => $timeout,
+			'usec' => 0,
+		];
 	    \socket_set_option($this->socket, SOL_TCP, SO_KEEPALIVE, 1);
-	    \socket_set_option($this->socket, SOL_SOCKET, SO_SNDTIMEO, $timeout);
-	    \socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, $timeout);
+		\socket_set_option($this->socket, SOL_SOCKET, SO_SNDTIMEO, $timeval);
+		\socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, $timeval);
 	    \socket_set_block($this->socket);
 	    $addresses = \gethostbynamel($host);
 	    if (false === $addresses) {
@@ -63,8 +55,6 @@ class NativeSocket implements Socket
 		    $error = \socket_last_error($this->socket);
 		    throw new Exception\ConnectionException($error, \socket_strerror($error));
 	    };
-	    \socket_set_option($this->socket, SOL_SOCKET, SO_SNDTIMEO, $sendTimeout);
-	    \socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, $receiveTimeout);
     }
 
 	/**

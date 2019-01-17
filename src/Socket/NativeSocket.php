@@ -88,15 +88,20 @@ class NativeSocket implements Socket
 	public function read($length)
 	{
 		$this->checkClosed();
-		$buffer = '';
-		while (\mb_strlen($buffer, '8BIT') < $length) {
-			$result = \socket_read($this->socket, $length - mb_strlen($buffer, '8BIT'));
-			if (false === $result) {
+		
+		$result = '';
+		
+		while (\mb_strlen($result, '8BIT') < $length) {
+			$buffer = '';
+			$numBytes = \socket_recv($this->socket, $buffer, $length - mb_strlen($result, '8BIT'), MSG_WAITALL);
+			if (false === $numBytes) {
 				$this->throwException();
 			}
-			$buffer .= $result;
+			if ($numBytes > 0) {
+				$result .= $buffer;
+			}
 		}
-		return $buffer;
+		return $result;
 	}
 
 	/**
@@ -107,23 +112,35 @@ class NativeSocket implements Socket
 	public function getLine($length = null)
 	{
 		$this->checkClosed();
-		$buffer = '';
 
-		// Reading stops at \r or \n. In case it stopped at \r we must continue reading.
+		$length = $length === null ? 1024 : $length;
+		
+		$line = '';
+
+		$timer = microtime(true);
 		do {
-			$line = \socket_read($this->socket, $length ?: 1024, PHP_NORMAL_READ);
-			if (false === $line) {
+			$buffer = '';
+			$numBytesPeeked = \socket_recv($this->socket, $buffer, $length, MSG_PEEK);
+			if (false === $numBytesPeeked) {
 				$this->throwException();
 			}
-
-			if ('' === $line) {
-				break;
+			$newLinePos = false;
+			if (0 === $numBytesPeeked) { // if socket_recv didn't timed out, do manual time out
+				if (microtime(true) - $timer > $this->timeout) {
+					throw new Exception\SocketException('Timeout has been reached');
+				}
+				usleep(50000);
+			} else {
+				$newLinePos = strpos($buffer, "\n");
+				$numBytesRead = \socket_recv($this->socket, $buffer, $newLinePos === false ? $numBytesPeeked : $newLinePos + 1, MSG_DONTWAIT);
+				if (false === $numBytesRead) {
+					$this->throwException();
+				}
+				$line .= $buffer;
 			}
+		} while ($newLinePos === false);
 
-			$buffer .= $line;
-		} while ('' !== $buffer && "\n" !== $buffer[\strlen($buffer) - 1]);
-
-		return \rtrim($buffer);
+		return \rtrim($line);
 	}
 
 	/**

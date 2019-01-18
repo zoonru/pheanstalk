@@ -277,7 +277,8 @@ class Pheanstalk implements PheanstalkInterface
     public function reserve($timeout = null)
     {
         $response = $this->_dispatch(
-            new Command\ReserveCommand($timeout)
+            new Command\ReserveCommand($timeout),
+			false
         );
 
         $falseResponses = array(
@@ -386,15 +387,22 @@ class Pheanstalk implements PheanstalkInterface
      * re-attempted once.
      *
      * @param Command $command
+	 * @param bool $reattempt re-attempt if Exception\SocketTimeoutException caught?
      *
      * @return Response
+	 * 
+	 * @throws Exception\SocketException
+	 * @throws Exception\SocketTimeoutException
      */
-    private function _dispatch($command)
+    private function _dispatch($command, $reattempt = true)
     {
         try {
             $response = $this->_connection->dispatchCommand($command);
         } catch (Exception\SocketException $e) {
             $this->_reconnect();
+			if (!$reattempt && $e instanceof Exception\SocketTimeoutException) {
+				throw $e;
+			}
             $response = $this->_connection->dispatchCommand($command);
         }
 

@@ -14,6 +14,10 @@ use Pheanstalk\Socket;
  */
 class NativeSocket implements Socket
 {
+	/**
+	 * time out code
+	 */
+	const EAGAIN = 11;
 	/** @var resource */
     private $socket;
 	/** @var int $timeout in seconds*/
@@ -127,7 +131,7 @@ class NativeSocket implements Socket
 			$newLinePos = false;
 			if (0 === $numBytesPeeked) { // if socket_recv didn't timed out, do manual time out
 				if (microtime(true) - $timer > $this->timeout) {
-					throw new Exception\SocketException('Timeout has been reached');
+					throw new Exception\SocketTimeoutException('Timeout has been reached');
 				}
 				usleep(50000);
 			} else {
@@ -159,7 +163,11 @@ class NativeSocket implements Socket
 	private function throwException()
 	{
 		$error = \socket_last_error($this->socket);
-		throw new Exception\SocketException(\socket_strerror($error), $error);
+		$msg = \socket_strerror($error);
+		if ($error === static::EAGAIN) {
+			throw new Exception\SocketTimeoutException($msg);
+		}
+		throw new Exception\SocketException($msg, $error);
 	}
 
 	/**

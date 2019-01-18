@@ -14,30 +14,28 @@ use Pheanstalk\Socket;
  */
 class NativeSocket implements Socket
 {
-    /**
-     * The default timeout for a blocking read on the socket.
-     */
-    const SOCKET_TIMEOUT = 1;
-
-    /**
-     * Number of retries for attempted writes which return zero length.
-     */
-    const WRITE_RETRIES = 8;
-
+	/**
+	 * time out code
+	 */
+	const EAGAIN = 11;
 	/** @var resource */
     private $socket;
+	/** @var int $timeout in seconds*/
+	private $timeout;
 
 	/**
 	 * NativeSocket constructor.
 	 * @param $host
 	 * @param $port
-	 * @param $connectTimeout
+	 * @param $timeout
 	 * @throws \Exception
 	 * @throws Exception\ConnectionException
 	 * @throws Exception\SocketException
 	 */
-    public function __construct($host, $port, $connectTimeout)
+	public function __construct($host, $port, $timeout)
     {
+		$this->timeout = $timeout;
+		
 	    if (!\extension_loaded('sockets')) {
 		    throw new \Exception('Sockets extension not found');
 	    }
@@ -45,15 +43,13 @@ class NativeSocket implements Socket
 	    if (false === $this->socket) {
 		    $this->throwException();
 	    }
-	    $timeout = [
-		    'sec' => $connectTimeout,
-		    'usec' => 0,
-	    ];
-	    $sendTimeout = \socket_get_option($this->socket, SOL_SOCKET, SO_SNDTIMEO);
-	    $receiveTimeout = \socket_get_option($this->socket, SOL_SOCKET, SO_RCVTIMEO);
+		$timeval = [
+			'sec' => $timeout,
+			'usec' => 0,
+		];
 	    \socket_set_option($this->socket, SOL_TCP, SO_KEEPALIVE, 1);
-	    \socket_set_option($this->socket, SOL_SOCKET, SO_SNDTIMEO, $timeout);
-	    \socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, $timeout);
+		\socket_set_option($this->socket, SOL_SOCKET, SO_SNDTIMEO, $timeval);
+		\socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, $timeval);
 	    \socket_set_block($this->socket);
 	    $addresses = \gethostbynamel($host);
 	    if (false === $addresses) {
@@ -63,8 +59,6 @@ class NativeSocket implements Socket
 		    $error = \socket_last_error($this->socket);
 		    throw new Exception\ConnectionException($error, \socket_strerror($error));
 	    };
-	    \socket_set_option($this->socket, SOL_SOCKET, SO_SNDTIMEO, $sendTimeout);
-	    \socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, $receiveTimeout);
     }
 
 	/**
@@ -98,15 +92,20 @@ class NativeSocket implements Socket
 	public function read($length)
 	{
 		$this->checkClosed();
-		$buffer = '';
-		while (\mb_strlen($buffer, '8BIT') < $length) {
-			$result = \socket_read($this->socket, $length - mb_strlen($buffer, '8BIT'));
-			if (false === $result) {
+		
+		$result = '';
+		
+		while (\mb_strlen($result, '8BIT') < $length) {
+			$buffer = '';
+			$numBytes = \socket_recv($this->socket, $buffer, $length - mb_strlen($result, '8BIT'), MSG_WAITALL);
+			if (false === $numBytes) {
 				$this->throwException();
 			}
-			$buffer .= $result;
+			if ($numBytes > 0) {
+				$result .= $buffer;
+			}
 		}
-		return $buffer;
+		return $result;
 	}
 
 	/**
@@ -117,23 +116,35 @@ class NativeSocket implements Socket
 	public function getLine($length = null)
 	{
 		$this->checkClosed();
-		$buffer = '';
 
-		// Reading stops at \r or \n. In case it stopped at \r we must continue reading.
+		$length = $length === null ? 1024 : $length;
+		
+		$line = '';
+
+		$timer = microtime(true);
 		do {
-			$line = \socket_read($this->socket, $length ?: 1024, PHP_NORMAL_READ);
-			if (false === $line) {
+			$buffer = '';
+			$numBytesPeeked = \socket_recv($this->socket, $buffer, $length, MSG_PEEK);
+			if (false === $numBytesPeeked) {
 				$this->throwException();
 			}
-
-			if ('' === $line) {
-				break;
+			$newLinePos = false;
+			if (0 === $numBytesPeeked) { // if socket_recv didn't timed out, do manual time out
+				if (microtime(true) - $timer > $this->timeout) {
+					throw new Exception\SocketTimeoutException('Timeout has been reached');
+				}
+				usleep(50000);
+			} else {
+				$newLinePos = strpos($buffer, "\n");
+				$numBytesRead = \socket_recv($this->socket, $buffer, $newLinePos === false ? $numBytesPeeked : $newLinePos + 1, MSG_DONTWAIT);
+				if (false === $numBytesRead) {
+					$this->throwException();
+				}
+				$line .= $buffer;
 			}
+		} while ($newLinePos === false);
 
-			$buffer .= $line;
-		} while ('' !== $buffer && "\n" !== $buffer[\strlen($buffer) - 1]);
-
-		return \rtrim($buffer);
+		return \rtrim($line);
 	}
 
 	/**
@@ -152,7 +163,11 @@ class NativeSocket implements Socket
 	private function throwException()
 	{
 		$error = \socket_last_error($this->socket);
-		throw new Exception\SocketException(\socket_strerror($error), $error);
+		$msg = \socket_strerror($error);
+		if ($error === static::EAGAIN) {
+			throw new Exception\SocketTimeoutException($msg);
+		}
+		throw new Exception\SocketException($msg, $error);
 	}
 
 	/**
